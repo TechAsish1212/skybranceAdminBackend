@@ -58,7 +58,7 @@ export const signup = async (req: Request, res: Response) => {
             message: 'User registered successfully. Please verify your email with the OTP sent.',
             data: {
                 userId: newUser._id,
-                name:newUser.name,
+                name: newUser.name,
                 email: newUser.email
             }
         });
@@ -126,133 +126,190 @@ export const verifyEmail = async (req: Request, res: Response) => {
     }
 }
 
+// resend verification otp
+export const resendOTP = async (req: Request, res: Response) => {
+    try {
+        const { email } = req.body;
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User Not Found"
+            })
+        }
+
+        if (user.isEmailVerified) {
+            return res.status(400).json({
+                success: false,
+                message: "user email is verified"
+            })
+        }
+        const newOtp = otpGenerator.generate(6, {
+            digits: true,
+            upperCaseAlphabets: true,
+            lowerCaseAlphabets: false,
+            specialChars: false,
+        });
+        const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+
+        user.authentication = {
+            ...user.authentication,
+            otp: newOtp,
+            expiry: otpExpiry
+        }
+        await user.save();
+
+        // send otp to email
+        const sendOtp = await sendEmail(email, newOtp);
+        if (!sendOtp) {
+            return res.status(400).json({
+                success: false,
+                message: 'Error coming while sending OTP to email'
+            })
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'New verification OTP sent to your email'
+        });
+
+    } catch (error) {
+        console.error('Resend OTP error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+}
+
 // login
 export const signin = async (req: Request, res: Response) => {
     try {
-      const { email, password, rememberMe = true } = req.body;
+        const { email, password, rememberMe = true } = req.body;
 
-      // Find user
-      const user = await User.findOne({ email });
-      if (!user) {
-        return res.status(401).json({ 
-          success: false, 
-          message: 'Invalid credentials' 
-        });
-      }
-
-      // Check if email is verified
-      if (!user.isEmailVerified) {
-        return res.status(401).json({ 
-          success: false, 
-          message: 'Please verify your email before logging in',
-          requiresVerification: true 
-        });
-      }
-
-      // Check if user is banned
-      if (user.isBanned) {
-        return res.status(403).json({ 
-          success: false, 
-          message: `Account is banned. Reason: ${user.banReason || 'No reason provided'}` 
-        });
-      }
-
-      // Check if account is deleted
-      if (user.isDeleted) {
-        return res.status(403).json({ 
-          success: false, 
-          message: 'Account has been deleted' 
-        });
-      }
-
-      // Verify password
-      const isValidPassword = await user.comparePassword(password);
-      if (!isValidPassword) {
-        return res.status(401).json({ 
-          success: false, 
-          message: 'Invalid credentials' 
-        });
-      }
-
-      // Set session duration based on rememberMe
-      const sessionDuration = rememberMe ? 30 : 1; 
-      const sessionExpiry = new Date();
-      sessionExpiry.setDate(sessionExpiry.getDate() + sessionDuration);
-
-      // Generate session token
-      const sessionToken = crypto.randomBytes(32).toString('hex');
-
-      const ip: string | null = req.connection.remoteAddress || req.ip || null;
-      const userAgent: string | null = req.headers['user-agent'] || null;
-
-      // Create session
-      const newSession = new userSession({
-        user: user._id,
-        token: sessionToken,
-        ip: ip ? ip.split('.').slice(0, -1).join('.') + '.xxx' : 'unknown',
-        userAgent,
-        lastLogin: new Date(),
-        expiry: sessionExpiry,
-      });
-
-      await newSession.save();
-
-      // Generate JWT token
-      const jwtToken = jwt.sign({
-        id: user._id,
-        sessionId: newSession._id,
-        token: sessionToken,
-        role: user.role,
-        type: "authorization",
-        loggedInAt: new Date(),
-        authMethod: 'standard-jwt',
-        provider: 'skybrance',
-        accessLevel: 'user',
-        appVersion: '1.0.0',
-      }, process.env.JWT_SECRET ?? 'your_jwt_secret', { 
-        expiresIn: `${sessionDuration}d` 
-      });
-
-      // Set HTTP-only cookie 
-      res.cookie('auth_token', jwtToken, {
-        httpOnly: true,       
-        secure: process.env.NODE_ENV === 'production', 
-        sameSite: 'strict',    
-        maxAge: sessionDuration * 24 * 60 * 60 * 1000, 
-        path: '/',
-      });
-
-
-      // Return user data 
-      const userData = {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isEmailVerified: user.isEmailVerified,
-        profilePicture: user.profilePicture,
-        themePreference: user.themePreference,
-        rememberMe: rememberMe,
-        sessionExpiry: sessionExpiry,
-      };
-
-      // return token in response 
-      return res.status(200).json({
-        success: true,
-        message: 'Login successful',
-        data: {
-          user: userData,
-          token: jwtToken, 
-          expiresIn: `${sessionDuration}d`,
-          sessionExpiry: sessionExpiry
+        // Find user
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid credentials'
+            });
         }
-      });
+
+        // Check if email is verified
+        if (!user.isEmailVerified) {
+            return res.status(401).json({
+                success: false,
+                message: 'Please verify your email before logging in',
+                requiresVerification: true
+            });
+        }
+
+        // Check if user is banned
+        if (user.isBanned) {
+            return res.status(403).json({
+                success: false,
+                message: `Account is banned. Reason: ${user.banReason || 'No reason provided'}`
+            });
+        }
+
+        // Check if account is deleted
+        if (user.isDeleted) {
+            return res.status(403).json({
+                success: false,
+                message: 'Account has been deleted'
+            });
+        }
+
+        // Verify password
+        const isValidPassword = await user.comparePassword(password);
+        if (!isValidPassword) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid credentials'
+            });
+        }
+
+        // Set session duration based on rememberMe
+        const sessionDuration = rememberMe ? 30 : 1;
+        const sessionExpiry = new Date();
+        sessionExpiry.setDate(sessionExpiry.getDate() + sessionDuration);
+
+        // Generate session token
+        const sessionToken = crypto.randomBytes(32).toString('hex');
+
+        const ip: string | null = req.connection.remoteAddress || req.ip || null;
+        const userAgent: string | null = req.headers['user-agent'] || null;
+
+        // Create session
+        const newSession = new userSession({
+            user: user._id,
+            token: sessionToken,
+            ip: ip ? ip.split('.').slice(0, -1).join('.') + '.xxx' : 'unknown',
+            userAgent,
+            lastLogin: new Date(),
+            expiry: sessionExpiry,
+        });
+
+        await newSession.save();
+
+        // Generate JWT token
+        const jwtToken = jwt.sign({
+            id: user._id,
+            sessionId: newSession._id,
+            token: sessionToken,
+            role: user.role,
+            type: "authorization",
+            loggedInAt: new Date(),
+            authMethod: 'standard-jwt',
+            provider: 'skybrance',
+            accessLevel: 'user',
+            appVersion: '1.0.0',
+        }, process.env.JWT_SECRET ?? 'your_jwt_secret', {
+            expiresIn: `${sessionDuration}d`
+        });
+
+        // Set HTTP-only cookie 
+        res.cookie('auth_token', jwtToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: sessionDuration * 24 * 60 * 60 * 1000,
+            path: '/',
+        });
+
+
+        // Return user data 
+        const userData = {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            isEmailVerified: user.isEmailVerified,
+            profilePicture: user.profilePicture,
+            themePreference: user.themePreference,
+            rememberMe: rememberMe,
+            sessionExpiry: sessionExpiry,
+        };
+
+        // return token in response 
+        return res.status(200).json({
+            success: true,
+            message: 'Login successful',
+            data: {
+                user: userData,
+                token: jwtToken,
+                expiresIn: `${sessionDuration}d`,
+                sessionExpiry: sessionExpiry
+            }
+        });
 
     } catch (error) {
-      console.error('Login error:', error);
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Internal server error' 
-      });
+        console.error('Login error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
     }
 }
