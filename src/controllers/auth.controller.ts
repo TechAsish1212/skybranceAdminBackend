@@ -313,3 +313,40 @@ export const signin = async (req: Request, res: Response) => {
         });
     }
 }
+
+// logout
+export const signout = async (req: Request, res: Response) => {
+    try {
+        const token = req.cookies?.auth_token || req.headers.authorization?.replace('Bearer', "");
+        if (token) {
+            try {
+                const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'jwthfdhdf');
+                if (decoded && decoded.sessionId) {
+                    await userSession.findByIdAndDelete(decoded.sessionId);
+                }
+            } catch (error) {
+
+            }
+        }
+
+        res.clearCookie('auth_token', {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            path: '/',
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Logged out successfully'
+        });
+
+    } catch (error) {
+        console.error('Logout error:', error);
+        res.clearCookie('auth_token');
+        return res.status(200).json({
+            success: true,
+            message: 'Logged out successfully'
+        });
+    }
+}
