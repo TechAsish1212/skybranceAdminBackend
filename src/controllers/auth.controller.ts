@@ -2,6 +2,9 @@ import { Request, Response } from "express";
 import otpGenerator from 'otp-generator';
 import { User } from "../models";
 import { sendEmail } from "../utils/email.service";
+import userSession from "../models/userSession";
+import jwt from 'jsonwebtoken'
+import crypto from 'crypto';
 
 // Admin register
 export const signup = async (req: Request, res: Response) => {
@@ -126,82 +129,130 @@ export const verifyEmail = async (req: Request, res: Response) => {
 // login
 export const signin = async (req: Request, res: Response) => {
     try {
-        const { email, password } = req.body;
+      const { email, password, rememberMe = true } = req.body;
 
-        // Find user
-        const admin = await User.findOne({ email });
-        if (!admin) {
-            res.status(401).json({
-                success: false,
-                message: 'Invalid credentials',
-            });
-            return;
-        }
-
-        // Check if user is admin or owner
-        if (!['admin', 'owner'].includes(admin.role)) {
-            res.status(403).json({
-                success: false,
-                message: 'Access denied. Admin privileges required.',
-            });
-            return;
-        }
-
-        // Check if admin is banned
-        if (admin.isBanned) {
-            res.status(403).json({
-                success: false,
-                message: `Account is banned. Reason: ${admin.banReason || 'Contact support'}`,
-            });
-            return;
-        }
-
-        // Check if account is deleted
-        if (admin.isDeleted) {
-            res.status(403).json({
-                success: false,
-                message: 'Account has been deleted',
-            });
-            return;
-        }
-
-        // Verify password
-        const isPasswordValid = await admin.comparePassword(password);
-        if (!isPasswordValid) {
-            res.status(401).json({
-                success: false,
-                message: 'Invalid credentials',
-            });
-            return;
-        }
-
-        // Generate auth token
-        const token = await admin.generateAuthToken(req);
-
-        // Log admin login
-        console.log(`Admin login: ${admin.email} (${admin.role}) from IP: ${req.ip}`);
-
-        res.json({
-            success: true,
-            message: 'Login successful',
-            data: {
-                token,
-                admin: {
-                    id: admin._id,
-                    name: admin.name,
-                    email: admin.email,
-                    role: admin.role,
-                    profilePicture: admin.profilePicture,
-                    lastLogin: new Date(),
-                },
-            },
+      // Find user
+      const user = await User.findOne({ email });
+      if (!user) {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Invalid credentials' 
         });
-    } catch (error: any) {
-        console.error('Admin login error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error during login',
-            error: error.message,
+      }
+
+      // Check if email is verified
+      if (!user.isEmailVerified) {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Please verify your email before logging in',
+          requiresVerification: true 
         });
+      }
+
+      // Check if user is banned
+      if (user.isBanned) {
+        return res.status(403).json({ 
+          success: false, 
+          message: `Account is banned. Reason: ${user.banReason || 'No reason provided'}` 
+        });
+      }
+
+      // Check if account is deleted
+      if (user.isDeleted) {
+        return res.status(403).json({ 
+          success: false, 
+          message: 'Account has been deleted' 
+        });
+      }
+
+      // Verify password
+      const isValidPassword = await user.comparePassword(password);
+      if (!isValidPassword) {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Invalid credentials' 
+        });
+      }
+
+      // Set session duration based on rememberMe
+      const sessionDuration = rememberMe ? 30 : 1; 
+      const sessionExpiry = new Date();
+      sessionExpiry.setDate(sessionExpiry.getDate() + sessionDuration);
+
+      // Generate session token
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+
+      const ip: string | null = req.connection.remoteAddress || req.ip || null;
+      const userAgent: string | null = req.headers['user-agent'] || null;
+
+      // Create session
+      const newSession = new userSession({
+        user: user._id,
+        token: sessionToken,
+        ip: ip ? ip.split('.').slice(0, -1).join('.') + '.xxx' : 'unknown',
+        userAgent,
+        lastLogin: new Date(),
+        expiry: sessionExpiry,
+      });
+
+      await newSession.save();
+
+      // Generate JWT token
+      const jwtToken = jwt.sign({
+        id: user._id,
+        sessionId: newSession._id,
+        token: sessionToken,
+        role: user.role,
+        type: "authorization",
+        loggedInAt: new Date(),
+        authMethod: 'standard-jwt',
+        provider: 'skybrance',
+        accessLevel: 'user',
+        appVersion: '1.0.0',
+      }, process.env.JWT_SECRET ?? 'your_jwt_secret', { 
+        expiresIn: `${sessionDuration}d` 
+      });
+
+      // Set HTTP-only cookie 
+      res.cookie('auth_token', jwtToken, {
+        httpOnly: true,       
+        secure: process.env.NODE_ENV === 'production', 
+        sameSite: 'strict',    
+        maxAge: sessionDuration * 24 * 60 * 60 * 1000, 
+        path: '/',
+      });
+
+
+      // Return user data 
+      const userData = {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isEmailVerified: user.isEmailVerified,
+        profilePicture: user.profilePicture,
+        themePreference: user.themePreference,
+        rememberMe: rememberMe,
+        sessionExpiry: sessionExpiry,
+      };
+
+      // return token in response 
+      return res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        data: {
+          user: userData,
+          token: jwtToken, 
+          expiresIn: `${sessionDuration}d`,
+          sessionExpiry: sessionExpiry
+        }
+      });
+
+    } catch (error) {
+      console.error('Login error:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Internal server error' 
+      });
     }
 }
