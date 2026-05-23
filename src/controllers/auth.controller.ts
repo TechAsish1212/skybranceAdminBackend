@@ -407,3 +407,77 @@ export const forgotPassword = async (req: Request, res: Response) => {
     }
 }
 
+// reset Password
+export const resetPassword = async (req: Request, res: Response) => {
+    try {
+        const { token, email, newPassword, confirmPassword } = req.body;
+        
+        if (!token || !email || !newPassword || !confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "All fields (token, email, newPassword, confirmPassword) are required"
+            });
+        }
+
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "Passwords do not match"
+            });
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must be at least 8 characters long"
+            });
+        }
+
+        const user = await User.findOne({
+            email,
+            'authentication.token': token
+        });
+
+        if (!user) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid or expired reset token'
+            });
+        }
+
+        if (user.authentication?.expiry && new Date() > user.authentication.expiry) {
+            return res.status(400).json({
+                success: false,
+                message: 'Reset token has expired. Please request a new one.'
+            });
+        }
+
+        user.password = newPassword;
+        user.lastPasswordChange = new Date();
+        
+        user.authentication.token = null;
+        user.authentication.expiry = null;
+
+        await userSession.deleteMany({ user: user._id });
+        await user.save();
+
+        res.clearCookie('auth_token', {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            path: '/',
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Password reset successful. Please login with your new password.'
+        });
+
+    } catch (error) {
+        console.error('Reset password error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error. Please try again later.'
+        });
+    }
+};
