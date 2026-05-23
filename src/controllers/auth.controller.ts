@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import otpGenerator from 'otp-generator';
 import { User } from "../models";
-import { sendEmail } from "../utils/email.service";
+import { sendEmail, sendPasswordResetEmail } from "../utils/email.service";
 import userSession from "../models/userSession";
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto';
@@ -350,3 +350,60 @@ export const signout = async (req: Request, res: Response) => {
         });
     }
 }
+
+// forgot password
+export const forgotPassword = async (req: Request, res: Response) => {
+    try {
+        const { email } = req.body;
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Email must be Required",
+            })
+        }
+
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User Not Found"
+            })
+        }
+
+        // gen reset token
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetTokenExipry = new Date(Date.now() + 10 * 60 * 1000);
+
+        user.authentication = {
+            ...user.authentication,
+            token: resetToken,
+            expiry: resetTokenExipry,
+        }
+
+        await user.save();
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const resetLink = `${frontendUrl}/reset-password?token=${resetToken}&email=${email}`;
+
+        // sent email
+        const emailSent = await sendPasswordResetEmail(email, resetLink);
+        if (!emailSent) {
+            return res.status(500).json({
+                success: false,
+                message: "Failed to send reset email. Please try again."
+            })
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Password reset link sent to your email"
+        });
+
+
+    } catch (error: any) {
+        res.status(500).json({
+            success: false,
+            message: error.message || "Internal server error"
+        });
+    }
+}
+
