@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { authenticate } from "../middlewares/auth";
-import { getProfile } from "../controllers/account.controller";
+import { getProfile, updateProfile } from "../controllers/account.controller";
 
-const accountRoutes=Router();
+const accountRoutes = Router();
 
-accountRoutes.get('/',authenticate,getProfile);
+accountRoutes.get('/', authenticate, getProfile);
+accountRoutes.patch('/update-profile', authenticate, updateProfile);
 
 export default accountRoutes;
