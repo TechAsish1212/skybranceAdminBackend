@@ -7,7 +7,7 @@ export const getProfile = async (req: Request, res: Response) => {
     try {
         const userFromMiddleware = (req as any).user;
 
-        console.log('User from middleware:', userFromMiddleware);
+        // console.log('User from middleware:', userFromMiddleware);
 
         let userId = userFromMiddleware?.id;
 
@@ -16,7 +16,7 @@ export const getProfile = async (req: Request, res: Response) => {
             userId = userId.toString();
         }
 
-        console.log('Processed User ID:', userId);
+        // console.log('Processed User ID:', userId);
 
         if (!userId) {
             return res.status(401).json({
@@ -160,6 +160,91 @@ export const updateProfile = async (req: Request, res: Response) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error'
+        });
+    }
+}
+
+// change password
+export const changePassword = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user.id;
+        const { currentPassword, newPassword, confirmPassword } = req.body;
+        if (!currentPassword||!newPassword || !confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "All fields are required"
+            })
+        }
+
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "New Password and confirm password do not match"
+            })
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({
+                success: false,
+                message: "New password must be at least 8 characters"
+            })
+        }
+
+        const user = await User.findById(userId).select('+password');
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User Not Found"
+            })
+        }
+
+        // current pass is correct or not
+        const isPasswordValid = await user.comparePassword(currentPassword);
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                success: false,
+                message: 'Current password is incorrect'
+            });
+        }
+
+        const isPasswordSame = await user.comparePassword(newPassword);
+        if (isPasswordSame) {
+            return res.status(401).json({
+                success: false,
+                message: 'previous password and new password is same.Please enter different password'
+            });
+        }
+
+        user.password = newPassword;
+        user.lastPasswordChange = new Date();
+        await user.save();
+
+
+        // Get current session ID from request
+        const currentSessionId = (req as any).sessionId;
+        const currentToken = (req as any).token;
+
+        // Invalidate all other sessions except current
+        const deletedSessions = await userSession.deleteMany({
+            user: userId,
+            _id: { $ne: currentSessionId }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Password changed successfully',
+            data: {
+                otherSessionsInvalidated: deletedSessions.deletedCount,
+                passwordChangedAt: user.lastPasswordChange
+            }
+        });
+
+
+    } catch (error: any) {
+        console.error('Change password error:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Internal server error'
         });
     }
 }
