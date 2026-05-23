@@ -78,7 +78,7 @@ export const sendPasswordResetEmail = async (email: string, resetLink: string) =
                 </div>
                 <div style="padding: 30px; background-color: #ffffff;">
                     <p style="font-size: 16px; color: #333;">Hello,</p>
-                    <p style="font-size: 16px; color: #333;">We received a request to reset your password for your <strong>Aptitude Platform</strong> account.</p>
+                    <p style="font-size: 16px; color: #333;">We received a request to reset your password for your <strong>SkyBrance</strong> account.</p>
                     <p style="font-size: 16px; color: #333;">Click the button below to reset your password:</p>
                     <div style="text-align: center; margin: 30px 0;">
                         <a href="${resetLink}" style="background-color: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
